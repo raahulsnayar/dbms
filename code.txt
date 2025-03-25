@@ -1,0 +1,264 @@
+-- Database creation
+CREATE DATABASE metro_card_system;
+USE metro_card_system;
+
+-- Users table to store passenger information
+CREATE TABLE users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    phone VARCHAR(15),
+    address VARCHAR(255),
+    date_of_birth DATE,
+    gender ENUM('Male', 'Female', 'Other'),
+    id_proof_type ENUM('Passport', 'Driver License', 'National ID', 'Student ID'),
+    id_proof_number VARCHAR(50),
+    password_hash VARCHAR(255) NOT NULL,
+    registration_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME,
+    account_status ENUM('Active', 'Suspended', 'Closed') DEFAULT 'Active'
+);
+
+-- User roles table
+CREATE TABLE user_roles (
+    role_id INT AUTO_INCREMENT PRIMARY KEY,
+    role_name VARCHAR(50) NOT NULL,
+    description TEXT
+);
+
+-- User-role mapping
+CREATE TABLE user_role_mapping (
+    mapping_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    role_id INT,
+    assigned_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (role_id) REFERENCES user_roles(role_id)
+);
+
+-- Card types with different fare policies
+CREATE TABLE card_types (
+    type_id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(50) NOT NULL,
+    description TEXT,
+    discount_percentage DECIMAL(5,2) DEFAULT 0.00,
+    validity_period INT, -- in days
+    base_price DECIMAL(10,2) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Metro cards table
+CREATE TABLE metro_cards (
+    card_id VARCHAR(20) PRIMARY KEY,
+    user_id INT,
+    type_id INT,
+    balance DECIMAL(10,2) DEFAULT 0.00,
+    issue_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expiry_date DATETIME,
+    last_recharge_date DATETIME,
+    auto_recharge BOOLEAN DEFAULT FALSE,
+    auto_recharge_amount DECIMAL(10,2),
+    auto_recharge_threshold DECIMAL(10,2),
+    card_status ENUM('Active', 'Blocked', 'Expired', 'Lost') DEFAULT 'Active',
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (type_id) REFERENCES card_types(type_id)
+);
+
+-- Stations table
+CREATE TABLE stations (
+    station_id INT AUTO_INCREMENT PRIMARY KEY,
+    station_name VARCHAR(100) NOT NULL,
+    station_code VARCHAR(10) NOT NULL UNIQUE,
+    address VARCHAR(255),
+    latitude DECIMAL(10,8),
+    longitude DECIMAL(11,8),
+    zone_id INT,
+    is_interchange BOOLEAN DEFAULT FALSE,
+    opening_time TIME,
+    closing_time TIME,
+    facilities TEXT,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Zones for fare calculation
+CREATE TABLE zones (
+    zone_id INT AUTO_INCREMENT PRIMARY KEY,
+    zone_name VARCHAR(50) NOT NULL,
+    description TEXT,
+    base_fare DECIMAL(6,2) NOT NULL
+);
+
+-- Add foreign key for stations
+ALTER TABLE stations
+ADD FOREIGN KEY (zone_id) REFERENCES zones(zone_id);
+
+-- Routes connecting stations
+CREATE TABLE routes (
+    route_id INT AUTO_INCREMENT PRIMARY KEY,
+    route_name VARCHAR(100) NOT NULL,
+    source_station_id INT,
+    destination_station_id INT,
+    distance DECIMAL(6,2), -- in kilometers
+    travel_time INT, -- in minutes
+    FOREIGN KEY (source_station_id) REFERENCES stations(station_id),
+    FOREIGN KEY (destination_station_id) REFERENCES stations(station_id)
+);
+
+-- Connecting stations in a route
+CREATE TABLE route_stations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    route_id INT,
+    station_id INT,
+    sequence_number INT NOT NULL,
+    estimated_time INT, -- in minutes from previous station
+    FOREIGN KEY (route_id) REFERENCES routes(route_id),
+    FOREIGN KEY (station_id) REFERENCES stations(station_id)
+);
+
+-- Fare table for different zones and card types
+CREATE TABLE fare_matrix (
+    fare_id INT AUTO_INCREMENT PRIMARY KEY,
+    from_zone_id INT,
+    to_zone_id INT,
+    card_type_id INT,
+    peak_fare DECIMAL(6,2) NOT NULL,
+    off_peak_fare DECIMAL(6,2) NOT NULL,
+    FOREIGN KEY (from_zone_id) REFERENCES zones(zone_id),
+    FOREIGN KEY (to_zone_id) REFERENCES zones(zone_id),
+    FOREIGN KEY (card_type_id) REFERENCES card_types(type_id)
+);
+
+-- Peak hours definition
+CREATE TABLE peak_hours (
+    peak_id INT AUTO_INCREMENT PRIMARY KEY,
+    day_of_week ENUM('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'),
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    description VARCHAR(100)
+);
+
+-- Transaction types
+CREATE TABLE transaction_types (
+    type_id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(50) NOT NULL,
+    description TEXT
+);
+
+-- Transactions table for all financial operations
+CREATE TABLE transactions (
+    transaction_id VARCHAR(36) PRIMARY KEY,
+    card_id VARCHAR(20),
+    transaction_type_id INT,
+    amount DECIMAL(10,2) NOT NULL,
+    previous_balance DECIMAL(10,2),
+    new_balance DECIMAL(10,2),
+    transaction_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('Success', 'Failed', 'Pending', 'Reversed') DEFAULT 'Success',
+    payment_method ENUM('Cash', 'Credit Card', 'Debit Card', 'Mobile Wallet', 'Bank Transfer'),
+    payment_reference VARCHAR(100),
+    staff_id INT, -- staff who processed the transaction if applicable
+    FOREIGN KEY (card_id) REFERENCES metro_cards(card_id),
+    FOREIGN KEY (transaction_type_id) REFERENCES transaction_types(type_id)
+);
+
+-- Journey table to track each trip
+CREATE TABLE journeys (
+    journey_id VARCHAR(36) PRIMARY KEY,
+    card_id VARCHAR(20) NOT NULL,
+    entry_station_id INT NOT NULL,
+    entry_timestamp DATETIME NOT NULL,
+    exit_station_id INT,
+    exit_timestamp DATETIME,
+    fare_amount DECIMAL(6,2),
+    journey_status ENUM('In Progress', 'Completed', 'Abandoned', 'Error') DEFAULT 'In Progress',
+    transaction_id VARCHAR(36),
+    FOREIGN KEY (card_id) REFERENCES metro_cards(card_id),
+    FOREIGN KEY (entry_station_id) REFERENCES stations(station_id),
+    FOREIGN KEY (exit_station_id) REFERENCES stations(station_id),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
+);
+
+-- Special offers and discounts
+CREATE TABLE special_offers (
+    offer_id INT AUTO_INCREMENT PRIMARY KEY,
+    offer_name VARCHAR(100) NOT NULL,
+    description TEXT,
+    discount_type ENUM('Percentage', 'Fixed Amount'),
+    discount_value DECIMAL(6,2) NOT NULL,
+    start_date DATETIME NOT NULL,
+    end_date DATETIME NOT NULL,
+    max_redemptions INT,
+    current_redemptions INT DEFAULT 0,
+    min_journey_count INT DEFAULT 0,
+    applicable_card_types TEXT, -- Comma-separated card type IDs
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Card-offer mapping
+CREATE TABLE card_offers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    card_id VARCHAR(20),
+    offer_id INT,
+    redemption_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (card_id) REFERENCES metro_cards(card_id),
+    FOREIGN KEY (offer_id) REFERENCES special_offers(offer_id)
+);
+
+-- Customer service requests
+CREATE TABLE service_requests (
+    request_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    card_id VARCHAR(20),
+    request_type ENUM('Card Replacement', 'Refund', 'Balance Adjustment', 'Information', 'Complaint'),
+    description TEXT,
+    submission_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('Open', 'In Progress', 'Resolved', 'Closed') DEFAULT 'Open',
+    assigned_to INT, -- staff id
+    resolution TEXT,
+    resolution_date DATETIME,
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (card_id) REFERENCES metro_cards(card_id)
+);
+
+-- Notifications table
+CREATE TABLE notifications (
+    notification_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    notification_type ENUM('Balance', 'Offer', 'Service', 'System', 'Other'),
+    is_read BOOLEAN DEFAULT FALSE,
+    creation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expiry_date DATETIME,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+-- Password reset tokens
+CREATE TABLE password_reset_tokens (
+    token_id VARCHAR(100) PRIMARY KEY,
+    user_id INT NOT NULL,
+    expiry_date DATETIME NOT NULL,
+    is_used BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+-- Maintenance schedule for the system
+CREATE TABLE maintenance_schedule (
+    schedule_id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    start_time DATETIME NOT NULL,
+    end_time DATETIME NOT NULL,
+    affected_stations TEXT, -- Comma-separated station IDs
+    created_by INT, -- staff id
+    creation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('Scheduled', 'In Progress', 'Completed', 'Cancelled') DEFAULT 'Scheduled'
+);
+
+-- Create some indexes for better performance
+CREATE INDEX idx_metro_cards_user_id ON metro_cards(user_id);
+CREATE INDEX idx_transactions_card_id ON transactions(card_id);
+CREATE INDEX idx_journeys_card_id ON journeys(card_id);
+CREATE INDEX idx_journeys_entry_exit ON journeys(entry_station_id, exit_station_id);
+CREATE INDEX idx_route_stations_route ON route_stations(route_id);
